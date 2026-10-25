@@ -1,0 +1,1147 @@
+/****************/
+// Mã sinh viên: [Điền mã sinh viên]
+// Họ tên: [Điền họ tên]
+/****************/
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace W07_GenericAllocation;
+
+public enum DeviceStatus
+{
+    Available,
+    Borrowed,
+    UnderMaintenance
+}
+
+public interface IIdentifiable
+{
+    string Id { get; }
+}
+
+public class DuplicateIdException : Exception
+{
+    public DuplicateIdException(string id)
+        : base($"Mã thiết bị '{id}' đã tồn tại.")
+    {
+    }
+}
+
+public class NoSuitableItemException : Exception
+{
+    public NoSuitableItemException()
+        : base("Không có thiết bị phù hợp để cấp phát.")
+    {
+    }
+}
+
+public class DeviceNotReadyException : Exception
+{
+    public DeviceNotReadyException(string id, DeviceStatus status)
+        : base($"Thiết bị '{id}' chưa sẵn sàng. Trạng thái: {status}.")
+    {
+    }
+}
+
+public abstract class TeachingDevice : IIdentifiable
+{
+    public string Id { get; }
+    public string Name { get; }
+    public string StorageLocation { get; }
+    public DeviceStatus Status { get; protected set; }
+
+    protected TeachingDevice(
+        string id,
+        string name,
+        string storageLocation)
+    {
+        Id = ValidateRequired(id, nameof(id));
+        Name = ValidateRequired(name, nameof(name));
+        StorageLocation = ValidateRequired(
+            storageLocation,
+            nameof(storageLocation));
+
+        Status = DeviceStatus.Available;
+    }
+
+    public abstract bool IsReadyForUse();
+
+    public abstract double GetDefaultPriorityScore();
+
+    public void Borrow()
+    {
+        if (!IsReadyForUse())
+        {
+            throw new DeviceNotReadyException(Id, Status);
+        }
+
+        Status = DeviceStatus.Borrowed;
+    }
+
+    public void Return()
+    {
+        if (Status != DeviceStatus.Borrowed)
+        {
+            throw new InvalidOperationException(
+                $"Thiết bị '{Id}' không ở trạng thái Borrowed.");
+        }
+
+        Status = DeviceStatus.Available;
+    }
+
+    public void SetUnderMaintenance(bool value)
+    {
+        if (Status == DeviceStatus.Borrowed)
+        {
+            throw new InvalidOperationException(
+                "Không thể chuyển thiết bị đang được mượn sang bảo trì.");
+        }
+
+        Status = value
+            ? DeviceStatus.UnderMaintenance
+            : DeviceStatus.Available;
+    }
+
+    protected static string ValidateRequired(
+        string value,
+        string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(
+                "Giá trị không được để trống.",
+                parameterName);
+        }
+
+        return value.Trim();
+    }
+
+    public override string ToString()
+    {
+        return $"{Id} - {Name} ({Status})";
+    }
+}
+
+public sealed class ProjectorRemote : TeachingDevice
+{
+    public int BatteryLevel { get; }
+
+    public ProjectorRemote(
+        string id,
+        string name,
+        string storageLocation,
+        int batteryLevel)
+        : base(id, name, storageLocation)
+    {
+        ValidatePercentage(batteryLevel, nameof(batteryLevel));
+        BatteryLevel = batteryLevel;
+    }
+
+    public override bool IsReadyForUse()
+    {
+        return Status == DeviceStatus.Available
+            && BatteryLevel >= 20;
+    }
+
+    public override double GetDefaultPriorityScore()
+    {
+        return BatteryLevel;
+    }
+
+    private static void ValidatePercentage(
+        int value,
+        string parameterName)
+    {
+        if (value < 0 || value > 100)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                "Giá trị phải nằm trong khoảng 0-100.");
+        }
+    }
+}
+
+public sealed class AirConditionerRemote : TeachingDevice
+{
+    public IReadOnlySet<string> CompatibleRooms { get; }
+
+    public AirConditionerRemote(
+        string id,
+        string name,
+        string storageLocation,
+        IEnumerable<string> compatibleRooms)
+        : base(id, name, storageLocation)
+    {
+        if (compatibleRooms == null)
+        {
+            throw new ArgumentNullException(nameof(compatibleRooms));
+        }
+
+        HashSet<string> rooms = new(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (string room in compatibleRooms)
+        {
+            if (string.IsNullOrWhiteSpace(room))
+            {
+                throw new ArgumentException(
+                    "Mã phòng không được để trống.");
+            }
+
+            rooms.Add(room.Trim());
+        }
+
+        CompatibleRooms = rooms;
+    }
+
+    public bool IsCompatibleWith(string roomId)
+    {
+        return !string.IsNullOrWhiteSpace(roomId)
+            && CompatibleRooms.Contains(roomId.Trim());
+    }
+
+    public override bool IsReadyForUse()
+    {
+        return Status == DeviceStatus.Available;
+    }
+
+    public override double GetDefaultPriorityScore()
+    {
+        return CompatibleRooms.Count > 0 ? 100 : 0;
+    }
+}
+
+public sealed class WirelessMicrophone : TeachingDevice
+{
+    public int BatteryLevel { get; }
+    public int SignalQuality { get; }
+
+    public WirelessMicrophone(
+        string id,
+        string name,
+        string storageLocation,
+        int batteryLevel,
+        int signalQuality)
+        : base(id, name, storageLocation)
+    {
+        ValidatePercentage(batteryLevel, nameof(batteryLevel));
+        ValidatePercentage(signalQuality, nameof(signalQuality));
+
+        BatteryLevel = batteryLevel;
+        SignalQuality = signalQuality;
+    }
+
+    public override bool IsReadyForUse()
+    {
+        return Status == DeviceStatus.Available
+            && BatteryLevel >= 30
+            && SignalQuality >= 40;
+    }
+
+    public override double GetDefaultPriorityScore()
+    {
+        return (BatteryLevel + SignalQuality) / 2.0;
+    }
+
+    private static void ValidatePercentage(
+        int value,
+        string parameterName)
+    {
+        if (value < 0 || value > 100)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                "Giá trị phải nằm trong khoảng 0-100.");
+        }
+    }
+}
+
+public interface IRepository<T> where T : IIdentifiable
+{
+    void Add(T item);
+    bool Remove(string id);
+    T? FindById(string id);
+    IReadOnlyList<T> GetAll();
+    IReadOnlyList<T> FindAll(Predicate<T> condition);
+}
+
+public sealed class InMemoryRepository<T> : IRepository<T>
+    where T : IIdentifiable
+{
+    private readonly Dictionary<string, T> _items =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public void Add(T item)
+    {
+        if (item == null)
+        {
+            throw new ArgumentNullException(nameof(item));
+        }
+
+        if (string.IsNullOrWhiteSpace(item.Id))
+        {
+            throw new ArgumentException(
+                "Mã định danh không được để trống.");
+        }
+
+        if (_items.ContainsKey(item.Id))
+        {
+            throw new DuplicateIdException(item.Id);
+        }
+
+        _items.Add(item.Id, item);
+    }
+
+    public bool Remove(string id)
+    {
+        ValidateId(id);
+        return _items.Remove(id.Trim());
+    }
+
+    public T? FindById(string id)
+    {
+        ValidateId(id);
+
+        return _items.TryGetValue(id.Trim(), out T? item)
+            ? item
+            : default;
+    }
+
+    public IReadOnlyList<T> GetAll()
+    {
+        return _items.Values.ToList().AsReadOnly();
+    }
+
+    public IReadOnlyList<T> FindAll(Predicate<T> condition)
+    {
+        if (condition == null)
+        {
+            throw new ArgumentNullException(nameof(condition));
+        }
+
+        return _items.Values
+            .Where(item => condition(item))
+            .ToList()
+            .AsReadOnly();
+    }
+
+    private static void ValidateId(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException(
+                "Mã tìm kiếm không được để trống.",
+                nameof(id));
+        }
+    }
+}
+
+public interface ISelectionStrategy<T>
+{
+    T Select(IReadOnlyList<T> candidates);
+}
+
+public sealed class FirstAvailableStrategy<T>
+    : ISelectionStrategy<T>
+{
+    public T Select(IReadOnlyList<T> candidates)
+    {
+        if (candidates == null)
+        {
+            throw new ArgumentNullException(nameof(candidates));
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw new NoSuitableItemException();
+        }
+
+        return candidates[0];
+    }
+}
+
+public sealed class HighestPriorityStrategy<T>
+    : ISelectionStrategy<T>
+{
+    private readonly Func<T, double> _scoreSelector;
+
+    public HighestPriorityStrategy(Func<T, double> scoreSelector)
+    {
+        _scoreSelector = scoreSelector
+            ?? throw new ArgumentNullException(nameof(scoreSelector));
+    }
+
+    public T Select(IReadOnlyList<T> candidates)
+    {
+        if (candidates == null)
+        {
+            throw new ArgumentNullException(nameof(candidates));
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw new NoSuitableItemException();
+        }
+
+        T best = candidates[0];
+        double bestScore = _scoreSelector(best);
+
+        for (int i = 1; i < candidates.Count; i++)
+        {
+            double score = _scoreSelector(candidates[i]);
+
+            if (score > bestScore)
+            {
+                best = candidates[i];
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+}
+
+public sealed class AllocationService<T>
+    where T : TeachingDevice
+{
+    private readonly IRepository<T> _repository;
+    private ISelectionStrategy<T> _strategy;
+
+    public AllocationService(
+        IRepository<T> repository,
+        ISelectionStrategy<T> strategy)
+    {
+        _repository = repository
+            ?? throw new ArgumentNullException(nameof(repository));
+
+        _strategy = strategy
+            ?? throw new ArgumentNullException(nameof(strategy));
+    }
+
+    public void ChangeStrategy(ISelectionStrategy<T> strategy)
+    {
+        _strategy = strategy
+            ?? throw new ArgumentNullException(nameof(strategy));
+    }
+
+    public T Allocate(Predicate<T>? additionalCondition = null)
+    {
+        IEnumerable<T> candidates = _repository
+            .GetAll()
+            .Where(device => device.IsReadyForUse());
+
+        if (additionalCondition != null)
+        {
+            candidates = candidates.Where(
+                device => additionalCondition(device));
+        }
+
+        T selected = _strategy.Select(candidates.ToList());
+        selected.Borrow();
+
+        return selected;
+    }
+}
+
+internal static class Program
+{
+    private static bool _useHighestPriority = true;
+
+    private static readonly InMemoryRepository<ProjectorRemote>
+        Projectors = new();
+
+    private static readonly InMemoryRepository<AirConditionerRemote>
+        AirConditioners = new();
+
+    private static readonly InMemoryRepository<WirelessMicrophone>
+        Microphones = new();
+
+    private static void Main(string[] args)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        SeedRepositories();
+
+        if (args.Any(
+            arg => arg.Equals(
+                "--test",
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            RunTests();
+            return;
+        }
+
+        RunMenu();
+    }
+
+    private static void SeedRepositories()
+    {
+        Projectors.Add(
+            new ProjectorRemote("PR-01", "Remote Epson 1", "Kho A", 55));
+
+        Projectors.Add(
+            new ProjectorRemote("PR-02", "Remote Epson 2", "Kho A", 92));
+
+        Projectors.Add(
+            new ProjectorRemote("PR-03", "Remote Epson 3", "Kho B", 15));
+
+        AirConditioners.Add(
+            new AirConditionerRemote(
+                "AC-01",
+                "Remote Daikin 1",
+                "Kho A",
+                new[] { "A203", "A204" }));
+
+        AirConditioners.Add(
+            new AirConditionerRemote(
+                "AC-02",
+                "Remote Daikin 2",
+                "Kho B",
+                new[] { "B101", "B102" }));
+
+        Microphones.Add(
+            new WirelessMicrophone(
+                "MIC-01", "Micro 1", "Tủ thiết bị 1", 20, 90));
+
+        Microphones.Add(
+            new WirelessMicrophone(
+                "MIC-02", "Micro 2", "Tủ thiết bị 1", 65, 80));
+
+        Microphones.Add(
+            new WirelessMicrophone(
+                "MIC-03", "Micro 3", "Tủ thiết bị 2", 45, 50));
+    }
+
+    private static IReadOnlyList<TeachingDevice> GetAllDevices()
+    {
+        IEnumerable<TeachingDevice> projectors =
+            Projectors.GetAll().Select(
+                device => (TeachingDevice)device);
+
+        IEnumerable<TeachingDevice> airConditioners =
+            AirConditioners.GetAll().Select(
+                device => (TeachingDevice)device);
+
+        IEnumerable<TeachingDevice> microphones =
+            Microphones.GetAll().Select(
+                device => (TeachingDevice)device);
+
+        return projectors
+            .Concat(airConditioners)
+            .Concat(microphones)
+            .ToList();
+    }
+
+    private static TeachingDevice? FindDevice(string id)
+    {
+        ProjectorRemote? projector = Projectors.FindById(id);
+
+        if (projector != null)
+        {
+            return projector;
+        }
+
+        AirConditionerRemote? airConditioner =
+            AirConditioners.FindById(id);
+
+        if (airConditioner != null)
+        {
+            return airConditioner;
+        }
+
+        return Microphones.FindById(id);
+    }
+
+    private static void RunMenu()
+    {
+        while (true)
+        {
+            Console.WriteLine();
+            Console.WriteLine("QUẢN LÝ VÀ CẤP PHÁT THIẾT BỊ");
+            Console.WriteLine(
+                $"Chiến lược: {(_useHighestPriority ? "Ưu tiên cao nhất" : "Sẵn sàng đầu tiên")}");
+
+            Console.WriteLine("1. Xem danh sách thiết bị");
+            Console.WriteLine("2. Thêm thiết bị");
+            Console.WriteLine("3. Tìm kiếm thiết bị");
+            Console.WriteLine("4. Lọc theo trạng thái");
+            Console.WriteLine("5. Cấp phát thiết bị");
+            Console.WriteLine("6. Trả thiết bị");
+            Console.WriteLine("7. Đổi chiến lược cấp phát");
+            Console.WriteLine("8. Cập nhật trạng thái bảo trì");
+            Console.WriteLine("9. Thống kê");
+            Console.WriteLine("0. Thoát");
+
+            int choice = ReadInt("Chọn chức năng: ");
+
+            try
+            {
+                switch (choice)
+                {
+                    case 1:
+                        ShowDevices(GetAllDevices());
+                        break;
+
+                    case 2:
+                        AddDevice();
+                        break;
+
+                    case 3:
+                        SearchDevices();
+                        break;
+
+                    case 4:
+                        FilterDevices();
+                        break;
+
+                    case 5:
+                        AllocateDevice();
+                        break;
+
+                    case 6:
+                        ReturnDevice();
+                        break;
+
+                    case 7:
+                        ChangeStrategy();
+                        break;
+
+                    case 8:
+                        UpdateMaintenanceStatus();
+                        break;
+
+                    case 9:
+                        ShowStatistics();
+                        break;
+
+                    case 0:
+                        return;
+
+                    default:
+                        Console.WriteLine("Lựa chọn không hợp lệ.");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Lỗi: {ex.Message}");
+            }
+        }
+    }
+
+    private static void ShowDevices(IEnumerable<TeachingDevice> devices)
+    {
+        List<TeachingDevice> list = devices.ToList();
+
+        if (list.Count == 0)
+        {
+            Console.WriteLine("Không tìm thấy thiết bị.");
+            return;
+        }
+
+        foreach (TeachingDevice device in list)
+        {
+            Console.WriteLine(
+                $"{device} | Vị trí: {device.StorageLocation} | " +
+                GetDeviceDetails(device));
+        }
+    }
+
+    private static string GetDeviceDetails(TeachingDevice device)
+    {
+        switch (device)
+        {
+            case ProjectorRemote projector:
+                return $"Pin: {projector.BatteryLevel}%";
+
+            case AirConditionerRemote aircon:
+                return "Phòng tương thích: " +
+                    string.Join(", ", aircon.CompatibleRooms);
+
+            case WirelessMicrophone microphone:
+                return $"Pin: {microphone.BatteryLevel}%, " +
+                    $"tín hiệu: {microphone.SignalQuality}%";
+
+            default:
+                return string.Empty;
+        }
+    }
+
+    private static void AddDevice()
+    {
+        Console.WriteLine("1. Remote máy chiếu");
+        Console.WriteLine("2. Remote điều hòa");
+        Console.WriteLine("3. Micro không dây");
+
+        int type = ReadInt("Chọn loại: ");
+
+        if (type < 1 || type > 3)
+        {
+            Console.WriteLine("Loại thiết bị không hợp lệ.");
+            return;
+        }
+
+        string id = ReadRequired("Mã thiết bị: ");
+
+        if (FindDevice(id) != null)
+        {
+            throw new DuplicateIdException(id);
+        }
+
+        string name = ReadRequired("Tên thiết bị: ");
+        string location = ReadRequired("Vị trí lưu trữ: ");
+
+        if (type == 1)
+        {
+            int battery = ReadPercentage("Mức pin (0-100): ");
+
+            Projectors.Add(
+                new ProjectorRemote(id, name, location, battery));
+        }
+        else if (type == 2)
+        {
+            string input = ReadRequired(
+                "Các phòng tương thích, cách nhau bằng dấu phẩy: ");
+
+            string[] rooms = input.Split(
+                ',',
+                StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries);
+
+            AirConditioners.Add(
+                new AirConditionerRemote(id, name, location, rooms));
+        }
+        else
+        {
+            int battery = ReadPercentage("Mức pin (0-100): ");
+            int signal = ReadPercentage("Chất lượng tín hiệu (0-100): ");
+
+            Microphones.Add(
+                new WirelessMicrophone(
+                    id, name, location, battery, signal));
+        }
+
+        Console.WriteLine("Đã thêm thiết bị.");
+    }
+
+    private static void SearchDevices()
+    {
+        string keyword = ReadRequired(
+            "Nhập mã, tên hoặc vị trí cần tìm: ");
+
+        IEnumerable<TeachingDevice> result = GetAllDevices()
+            .Where(device =>
+                device.Id.Contains(
+                    keyword, StringComparison.OrdinalIgnoreCase)
+                || device.Name.Contains(
+                    keyword, StringComparison.OrdinalIgnoreCase)
+                || device.StorageLocation.Contains(
+                    keyword, StringComparison.OrdinalIgnoreCase));
+
+        ShowDevices(result);
+    }
+
+    private static void FilterDevices()
+    {
+        Console.WriteLine("1. Available");
+        Console.WriteLine("2. Borrowed");
+        Console.WriteLine("3. UnderMaintenance");
+
+        int choice = ReadInt("Chọn trạng thái: ");
+
+        DeviceStatus? status = choice switch
+        {
+            1 => DeviceStatus.Available,
+            2 => DeviceStatus.Borrowed,
+            3 => DeviceStatus.UnderMaintenance,
+            _ => null
+        };
+
+        if (status == null)
+        {
+            Console.WriteLine("Lựa chọn không hợp lệ.");
+            return;
+        }
+
+        ShowDevices(
+            GetAllDevices().Where(
+                device => device.Status == status.Value));
+    }
+
+    private static void AllocateDevice()
+    {
+        Console.WriteLine("1. Remote máy chiếu");
+        Console.WriteLine("2. Remote điều hòa");
+        Console.WriteLine("3. Micro không dây");
+
+        int type = ReadInt("Chọn loại: ");
+
+        if (type == 1)
+        {
+            var service = new AllocationService<ProjectorRemote>(
+                Projectors,
+                CreateStrategy<ProjectorRemote>());
+
+            Console.WriteLine(
+                $"Đã cấp phát: {service.Allocate()}");
+        }
+        else if (type == 2)
+        {
+            string room = ReadRequired("Mã phòng sử dụng: ");
+
+            var service = new AllocationService<AirConditionerRemote>(
+                AirConditioners,
+                CreateStrategy<AirConditionerRemote>());
+
+            AirConditionerRemote selected = service.Allocate(
+                device => device.IsCompatibleWith(room));
+
+            Console.WriteLine(
+                $"Đã cấp phát cho phòng {room}: {selected}");
+        }
+        else if (type == 3)
+        {
+            var service = new AllocationService<WirelessMicrophone>(
+                Microphones,
+                CreateStrategy<WirelessMicrophone>());
+
+            Console.WriteLine(
+                $"Đã cấp phát: {service.Allocate()}");
+        }
+        else
+        {
+            Console.WriteLine("Loại thiết bị không hợp lệ.");
+        }
+    }
+
+    private static ISelectionStrategy<T> CreateStrategy<T>()
+        where T : TeachingDevice
+    {
+        if (_useHighestPriority)
+        {
+            return new HighestPriorityStrategy<T>(
+                device => device.GetDefaultPriorityScore());
+        }
+
+        return new FirstAvailableStrategy<T>();
+    }
+
+    private static void ReturnDevice()
+    {
+        string id = ReadRequired("Mã thiết bị cần trả: ");
+        TeachingDevice? device = FindDevice(id);
+
+        if (device == null)
+        {
+            Console.WriteLine("Không tìm thấy thiết bị.");
+            return;
+        }
+
+        device.Return();
+        Console.WriteLine($"Đã trả thiết bị: {device}");
+    }
+
+    private static void ChangeStrategy()
+    {
+        Console.WriteLine("1. Ưu tiên cao nhất");
+        Console.WriteLine("2. Thiết bị sẵn sàng đầu tiên");
+
+        int choice = ReadInt("Chọn chiến lược: ");
+
+        if (choice == 1)
+        {
+            _useHighestPriority = true;
+        }
+        else if (choice == 2)
+        {
+            _useHighestPriority = false;
+        }
+        else
+        {
+            Console.WriteLine("Lựa chọn không hợp lệ.");
+            return;
+        }
+
+        Console.WriteLine("Đã đổi chiến lược.");
+    }
+
+    private static void UpdateMaintenanceStatus()
+    {
+        string id = ReadRequired("Mã thiết bị: ");
+        TeachingDevice? device = FindDevice(id);
+
+        if (device == null)
+        {
+            Console.WriteLine("Không tìm thấy thiết bị.");
+            return;
+        }
+
+        Console.WriteLine("1. Bắt đầu bảo trì");
+        Console.WriteLine("2. Kết thúc bảo trì");
+
+        int choice = ReadInt("Chọn thao tác: ");
+
+        if (choice == 1)
+        {
+            device.SetUnderMaintenance(true);
+        }
+        else if (choice == 2)
+        {
+            device.SetUnderMaintenance(false);
+        }
+        else
+        {
+            Console.WriteLine("Lựa chọn không hợp lệ.");
+            return;
+        }
+
+        Console.WriteLine($"Trạng thái mới: {device.Status}");
+    }
+
+    private static void ShowStatistics()
+    {
+        IReadOnlyList<TeachingDevice> devices = GetAllDevices();
+
+        Console.WriteLine($"Tổng số thiết bị: {devices.Count}");
+        Console.WriteLine(
+            $"Remote máy chiếu: {devices.OfType<ProjectorRemote>().Count()}");
+        Console.WriteLine(
+            $"Remote điều hòa: {devices.OfType<AirConditionerRemote>().Count()}");
+        Console.WriteLine(
+            $"Micro không dây: {devices.OfType<WirelessMicrophone>().Count()}");
+
+        Console.WriteLine(
+            $"Available: {devices.Count(d => d.Status == DeviceStatus.Available)}");
+        Console.WriteLine(
+            $"Borrowed: {devices.Count(d => d.Status == DeviceStatus.Borrowed)}");
+        Console.WriteLine(
+            $"UnderMaintenance: {devices.Count(d => d.Status == DeviceStatus.UnderMaintenance)}");
+        Console.WriteLine(
+            $"Sẵn sàng sử dụng: {devices.Count(d => d.IsReadyForUse())}");
+    }
+
+    private static string ReadRequired(string prompt)
+    {
+        while (true)
+        {
+            Console.Write(prompt);
+            string? input = Console.ReadLine();
+
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                return input.Trim();
+            }
+
+            Console.WriteLine("Giá trị không được để trống.");
+        }
+    }
+
+    private static int ReadInt(string prompt)
+    {
+        while (true)
+        {
+            Console.Write(prompt);
+
+            if (int.TryParse(Console.ReadLine(), out int value))
+            {
+                return value;
+            }
+
+            Console.WriteLine("Vui lòng nhập số nguyên.");
+        }
+    }
+
+    private static int ReadPercentage(string prompt)
+    {
+        while (true)
+        {
+            int value = ReadInt(prompt);
+
+            if (value >= 0 && value <= 100)
+            {
+                return value;
+            }
+
+            Console.WriteLine("Giá trị phải nằm trong khoảng 0-100.");
+        }
+    }
+
+    private static void RunTests()
+    {
+        int passed = 0;
+        int failed = 0;
+
+        RunTest("Repository lưu dữ liệu", () =>
+        {
+            Assert(Projectors.GetAll().Count == 3);
+            Assert(AirConditioners.GetAll().Count == 2);
+            Assert(Microphones.GetAll().Count == 3);
+        }, ref passed, ref failed);
+
+        RunTest("Phát hiện mã trùng", () =>
+        {
+            AssertThrows<DuplicateIdException>(() =>
+                Projectors.Add(
+                    new ProjectorRemote(
+                        "PR-02", "Remote trùng", "Kho C", 80)));
+        }, ref passed, ref failed);
+
+        RunTest("Tìm thiết bị theo mã", () =>
+        {
+            Assert(Projectors.FindById("PR-02") != null);
+            Assert(Projectors.FindById("PR-UNKNOWN") == null);
+        }, ref passed, ref failed);
+
+        RunTest("Lọc remote máy chiếu sẵn sàng", () =>
+        {
+            var ready = Projectors.FindAll(
+                device => device.IsReadyForUse());
+
+            Assert(ready.Count == 2);
+        }, ref passed, ref failed);
+
+        RunTest("Chọn thiết bị có điểm ưu tiên cao nhất", () =>
+        {
+            var strategy = new HighestPriorityStrategy<ProjectorRemote>(
+                device => device.GetDefaultPriorityScore());
+
+            var selected = strategy.Select(
+                Projectors.FindAll(device => device.IsReadyForUse()));
+
+            Assert(selected.Id == "PR-02");
+        }, ref passed, ref failed);
+
+        RunTest("Cấp phát remote điều hòa tương thích", () =>
+        {
+            var service = new AllocationService<AirConditionerRemote>(
+                AirConditioners,
+                new HighestPriorityStrategy<AirConditionerRemote>(
+                    device => device.GetDefaultPriorityScore()));
+
+            var selected = service.Allocate(
+                device => device.IsCompatibleWith("A203"));
+
+            Assert(selected.Id == "AC-01");
+            Assert(selected.Status == DeviceStatus.Borrowed);
+        }, ref passed, ref failed);
+
+        RunTest("Chọn micro sẵn sàng đầu tiên", () =>
+        {
+            var service = new AllocationService<WirelessMicrophone>(
+                Microphones,
+                new FirstAvailableStrategy<WirelessMicrophone>());
+
+            var selected = service.Allocate();
+
+            Assert(selected.Id == "MIC-02");
+            Assert(selected.Status == DeviceStatus.Borrowed);
+        }, ref passed, ref failed);
+
+        RunTest("Đổi chiến lược cấp phát", () =>
+        {
+            var service = new AllocationService<ProjectorRemote>(
+                Projectors,
+                new HighestPriorityStrategy<ProjectorRemote>(
+                    device => device.GetDefaultPriorityScore()));
+
+            var first = service.Allocate();
+
+            service.ChangeStrategy(
+                new FirstAvailableStrategy<ProjectorRemote>());
+
+            var second = service.Allocate();
+
+            Assert(first.Id == "PR-02");
+            Assert(second.Id == "PR-01");
+        }, ref passed, ref failed);
+
+        RunTest("Không có thiết bị phù hợp", () =>
+        {
+            var strategy = new FirstAvailableStrategy<ProjectorRemote>();
+
+            AssertThrows<NoSuitableItemException>(() =>
+                strategy.Select(Array.Empty<ProjectorRemote>()));
+        }, ref passed, ref failed);
+
+        RunTest("Thiết bị được cấp phát chuyển sang Borrowed", () =>
+        {
+            var repository = new InMemoryRepository<ProjectorRemote>();
+
+            var device = new ProjectorRemote(
+                "TEST-01", "Remote kiểm thử", "Kho kiểm thử", 90);
+
+            repository.Add(device);
+
+            var service = new AllocationService<ProjectorRemote>(
+                repository,
+                new FirstAvailableStrategy<ProjectorRemote>());
+
+            service.Allocate();
+
+            Assert(device.Status == DeviceStatus.Borrowed);
+        }, ref passed, ref failed);
+
+        RunTest("Không thể mượn thiết bị chưa sẵn sàng", () =>
+        {
+            var device = new ProjectorRemote(
+                "TEST-02", "Remote pin yếu", "Kho kiểm thử", 10);
+
+            AssertThrows<DeviceNotReadyException>(() => device.Borrow());
+            Assert(device.Status == DeviceStatus.Available);
+        }, ref passed, ref failed);
+
+        Console.WriteLine();
+        Console.WriteLine(
+            $"Kết quả: {passed} PASS, {failed} FAIL, {passed + failed} bài kiểm thử.");
+
+        if (failed > 0)
+        {
+            Environment.ExitCode = 1;
+        }
+    }
+
+    private static void RunTest(
+        string name,
+        Action action,
+        ref int passed,
+        ref int failed)
+    {
+        try
+        {
+            action();
+            passed++;
+            Console.WriteLine($"[PASS] {name}");
+        }
+        catch (Exception ex)
+        {
+            failed++;
+            Console.WriteLine($"[FAIL] {name}: {ex.Message}");
+        }
+    }
+
+    private static void Assert(bool condition)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException(
+                "Điều kiện kiểm thử không đúng.");
+        }
+    }
+
+    private static void AssertThrows<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Không phát sinh ngoại lệ {typeof(TException).Name}.");
+    }
+}
