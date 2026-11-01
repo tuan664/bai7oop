@@ -1,0 +1,469 @@
+
+/****************/
+// Họ tên: Trần Huy Tuấn
+// MSSV: 202419009
+/****************/
+
+namespace DeviceMonitoringLab;
+
+// Lớp điều khiển giao diện nhập, xử lý và xuất dữ liệu
+public sealed class DeviceMonitoringApplication : IDisposable
+{
+    private readonly TextReader input;
+    private readonly TextWriter output;
+
+    private readonly ProjectorRemote projector;
+    private readonly AirConditionerRemote airConditioner;
+    private readonly WirelessMicrophone microphone;
+    private readonly TeachingDevice[] devices;
+
+    private readonly DeviceAuditLogger auditLogger = new();
+    private readonly MaintenanceService maintenanceService = new();
+    private readonly DeviceMonitoringCoordinator coordinator;
+
+    private int criticalFilterCount;
+    private bool disposed;
+
+    public DeviceMonitoringApplication(
+        TextReader input, TextWriter output)
+    {
+        this.input = input ??
+            throw new ArgumentNullException(nameof(input));
+
+        this.output = output ??
+            throw new ArgumentNullException(nameof(output));
+
+        // Khởi tạo ba thiết bị
+        projector = new ProjectorRemote(
+            "PJ-01", "Điều khiển máy chiếu");
+
+        airConditioner = new AirConditionerRemote(
+            "AC-01", "Điều khiển điều hòa", "D9-401");
+
+        microphone = new WirelessMicrophone(
+            "MIC-01", "Micro không dây");
+
+        devices = new TeachingDevice[]
+        {
+            projector,
+            airConditioner,
+            microphone
+        };
+
+        // Khởi tạo dịch vụ thông báo
+        var notificationService =
+            new ConsoleNotificationService(output);
+
+        // Delegate lọc cảnh báo nghiêm trọng
+        var criticalOnly = new FilteredAlertSubscriber(
+            alert => alert.Severity == AlertSeverity.Critical,
+            alert =>
+            {
+                criticalFilterCount++;
+
+                output.WriteLine(
+                    $"[LỌC CRITICAL] {alert.DeviceId}: {alert.Message}");
+            });
+
+        // Điều phối các subscriber
+        coordinator = new DeviceMonitoringCoordinator(
+            devices,
+            notificationService,
+            auditLogger,
+            maintenanceService,
+            new[] { criticalOnly });
+
+        coordinator.Subscribe();
+    }
+
+    // Vòng lặp chính của chương trình
+    public void Run()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        output.WriteLine("=======================================");
+        output.WriteLine(" QUẢN LÝ THIẾT BỊ - DELEGATE & EVENT");
+        output.WriteLine(" Họ tên: Trần Huy Tuấn | MSSV: 202419009");
+        output.WriteLine("=======================================");
+
+        while (true)
+        {
+            PrintMenu();
+
+            int? command = ReadInteger("Chọn chức năng: ");
+
+            if (command is null || command == 0)
+            {
+                output.WriteLine("Đã kết thúc chương trình.");
+                break;
+            }
+
+            try
+            {
+                switch (command.Value)
+                {
+                    case 1:
+                        ShowDevices();
+                        break;
+
+                    case 2:
+                        ChangeDeviceStatus();
+                        break;
+
+                    case 3:
+                        UpdateProjectorBattery();
+                        break;
+
+                    case 4:
+                        UpdateAirConditionerResponse();
+                        break;
+
+                    case 5:
+                        UpdateMicrophoneBattery();
+                        break;
+
+                    case 6:
+                        UpdateMicrophoneSignal();
+                        break;
+
+                    case 7:
+                        ShowAuditLog();
+                        break;
+
+                    case 8:
+                        ShowMaintenanceRequests();
+                        break;
+
+                    case 9:
+                        Subscribe();
+                        break;
+
+                    case 10:
+                        Unsubscribe();
+                        break;
+
+                    case 11:
+                        ShowStatistics();
+                        break;
+
+                    default:
+                        output.WriteLine(
+                            "Chức năng không tồn tại. Chọn từ 0 đến 11.");
+                        break;
+                }
+            }
+            catch (InvalidDeviceReadingException ex)
+            {
+                // Bắt ngoại lệ nhưng không dừng chương trình
+                output.WriteLine(
+                    $"[LỖI DỮ LIỆU] {ex.Message}");
+            }
+        }
+    }
+
+    // Xuất menu chức năng
+    private void PrintMenu()
+    {
+        output.WriteLine();
+        output.WriteLine("=============== MENU ===============");
+        output.WriteLine(" 1. Xem danh sách thiết bị");
+        output.WriteLine(" 2. Thay đổi trạng thái thiết bị");
+        output.WriteLine(" 3. Cập nhật pin điều khiển máy chiếu");
+        output.WriteLine(" 4. Cập nhật phản hồi điều hòa");
+        output.WriteLine(" 5. Cập nhật pin micro");
+        output.WriteLine(" 6. Cập nhật chất lượng tín hiệu micro");
+        output.WriteLine(" 7. Xem nhật ký đổi trạng thái");
+        output.WriteLine(" 8. Xem yêu cầu bảo trì");
+        output.WriteLine(" 9. Đăng ký nhận sự kiện");
+        output.WriteLine("10. Hủy đăng ký nhận sự kiện");
+        output.WriteLine("11. Thống kê");
+        output.WriteLine(" 0. Thoát");
+    }
+
+    // Nhập số nguyên và kiểm tra kiểu dữ liệu
+    private int? ReadInteger(string prompt)
+    {
+        while (true)
+        {
+            output.Write(prompt);
+            string? raw = input.ReadLine();
+
+            if (raw is null)
+                return null;
+
+            if (int.TryParse(raw.Trim(), out int result))
+                return result;
+
+            output.WriteLine(
+                "Dữ liệu không hợp lệ. Vui lòng nhập số nguyên.");
+        }
+    }
+
+    // Cho phép người dùng lựa chọn thiết bị
+    private TeachingDevice? SelectDevice()
+    {
+        output.WriteLine("1. PJ-01 - Máy chiếu");
+        output.WriteLine("2. AC-01 - Điều hòa");
+        output.WriteLine("3. MIC-01 - Micro");
+
+        int? index = ReadInteger("Chọn thiết bị (1-3): ");
+
+        if (index is >= 1 and <= 3)
+            return devices[index.Value - 1];
+
+        output.WriteLine(
+            "Thiết bị không hợp lệ hoặc chưa chọn.");
+
+        return null;
+    }
+
+    // Xuất danh sách và trạng thái của các thiết bị
+    private void ShowDevices()
+    {
+        output.WriteLine("\n--- DANH SÁCH THIẾT BỊ ---");
+
+        foreach (TeachingDevice device in devices)
+        {
+            string info = device switch
+            {
+                ProjectorRemote p =>
+                    $"Pin: {p.BatteryLevel}%",
+
+                AirConditionerRemote ac =>
+                    $"Phòng: {ac.AssignedRoom}; " +
+                    $"Phản hồi: {(ac.IsResponsive ? "Có" : "Không")}",
+
+                WirelessMicrophone mic =>
+                    $"Pin: {mic.BatteryLevel}%; " +
+                    $"Tín hiệu: {mic.SignalQuality}%",
+
+                _ => "Không có thông tin"
+            };
+
+            output.WriteLine(
+                $"{device.Id} | {device.Name} | " +
+                $"{device.Status} | {info}");
+        }
+    }
+
+    // Nhập và xử lý thay đổi trạng thái
+    private void ChangeDeviceStatus()
+    {
+        TeachingDevice? device = SelectDevice();
+
+        if (device is null)
+            return;
+
+        output.WriteLine("1. Available (Sẵn sàng)");
+        output.WriteLine("2. Borrowed (Đang mượn)");
+        output.WriteLine("3. UnderMaintenance (Đang bảo trì)");
+
+        int? choice = ReadInteger("Chọn trạng thái (1-3): ");
+
+        if (choice is not (>= 1 and <= 3))
+        {
+            output.WriteLine(
+                "Trạng thái không hợp lệ hoặc chưa chọn.");
+
+            return;
+        }
+
+        DeviceStatus oldStatus = device.Status;
+
+        DeviceStatus newStatus =
+            (DeviceStatus)(choice.Value - 1);
+
+        device.ChangeStatus(newStatus);
+
+        if (oldStatus == newStatus)
+        {
+            output.WriteLine(
+                "Trạng thái không đổi: không phát sinh sự kiện.");
+        }
+        else
+        {
+            output.WriteLine(
+                $"Đã đổi {device.Id}: {oldStatus} -> {newStatus}.");
+        }
+    }
+
+    // Nhập và xử lý pin máy chiếu
+    private void UpdateProjectorBattery()
+    {
+        int? value = ReadInteger(
+            "Nhập pin máy chiếu (0-100): ");
+
+        if (value is null)
+            return;
+
+        int old = projector.BatteryLevel;
+
+        projector.UpdateBatteryLevel(value.Value);
+
+        output.WriteLine(
+            $"Pin máy chiếu: {old}% -> {projector.BatteryLevel}%.");
+    }
+
+    // Nhập trạng thái phản hồi điều hòa
+    private void UpdateAirConditionerResponse()
+    {
+        output.WriteLine(
+            "1. Có phản hồi | 0. Không phản hồi");
+
+        int? value = ReadInteger(
+            "Nhập trạng thái phản hồi (0/1): ");
+
+        if (value is not (0 or 1))
+        {
+            output.WriteLine(
+                "Chỉ chấp nhận giá trị 0 hoặc 1.");
+
+            return;
+        }
+
+        bool old = airConditioner.IsResponsive;
+
+        airConditioner.UpdateResponseState(value == 1);
+
+        output.WriteLine(
+            $"Điều hòa: {(old ? "Có" : "Không")} -> " +
+            $"{(airConditioner.IsResponsive ? "Có" : "Không")} phản hồi.");
+    }
+
+    // Nhập và xử lý pin micro
+    private void UpdateMicrophoneBattery()
+    {
+        int? value = ReadInteger(
+            "Nhập pin micro (0-100): ");
+
+        if (value is null)
+            return;
+
+        int old = microphone.BatteryLevel;
+
+        microphone.UpdateBatteryLevel(value.Value);
+
+        output.WriteLine(
+            $"Pin micro: {old}% -> {microphone.BatteryLevel}%.");
+    }
+
+    // Nhập và xử lý tín hiệu micro
+    private void UpdateMicrophoneSignal()
+    {
+        int? value = ReadInteger(
+            "Nhập chất lượng tín hiệu (0-100): ");
+
+        if (value is null)
+            return;
+
+        int old = microphone.SignalQuality;
+
+        microphone.UpdateSignalQuality(value.Value);
+
+        output.WriteLine(
+            $"Tín hiệu micro: {old}% -> {microphone.SignalQuality}%.");
+    }
+
+    // Xuất nhật ký thay đổi trạng thái
+    private void ShowAuditLog()
+    {
+        output.WriteLine(
+            "\n--- NHẬT KÝ ĐỔI TRẠNG THÁI ---");
+
+        if (auditLogger.Entries.Count == 0)
+        {
+            output.WriteLine("Chưa có bản ghi.");
+        }
+        else
+        {
+            foreach (string entry in auditLogger.Entries)
+            {
+                output.WriteLine(entry);
+            }
+        }
+    }
+
+    // Xuất danh sách yêu cầu bảo trì
+    private void ShowMaintenanceRequests()
+    {
+        output.WriteLine(
+            "\n--- YÊU CẦU BẢO TRÌ ---");
+
+        if (maintenanceService.Requests.Count == 0)
+        {
+            output.WriteLine("Chưa có yêu cầu bảo trì.");
+        }
+        else
+        {
+            foreach (string request in maintenanceService.Requests)
+            {
+                output.WriteLine(request);
+            }
+        }
+    }
+
+    // Đăng ký nhận sự kiện
+    private void Subscribe()
+    {
+        if (coordinator.IsSubscribed)
+        {
+            output.WriteLine(
+                "Đã đăng ký trước đó, không đăng ký trùng.");
+
+            return;
+        }
+
+        coordinator.Subscribe();
+
+        output.WriteLine(
+            "Đã đăng ký nhận các sự kiện.");
+    }
+
+    // Hủy đăng ký nhận sự kiện
+    private void Unsubscribe()
+    {
+        if (!coordinator.IsSubscribed)
+        {
+            output.WriteLine(
+                "Hiện không có đăng ký sự kiện.");
+
+            return;
+        }
+
+        coordinator.Unsubscribe();
+
+        output.WriteLine(
+            "Đã hủy đăng ký. Thiết bị vẫn cập nhật dữ liệu nhưng không thông báo.");
+    }
+
+    // Xuất thống kê
+    private void ShowStatistics()
+    {
+        output.WriteLine("\n--- THỐNG KÊ ---");
+
+        output.WriteLine(
+            $"Số thiết bị: {devices.Length}");
+
+        output.WriteLine(
+            $"Số nhật ký đổi trạng thái: {auditLogger.Entries.Count}");
+
+        output.WriteLine(
+            $"Số yêu cầu bảo trì: {maintenanceService.Requests.Count}");
+
+        output.WriteLine(
+            $"Số cảnh báo qua bộ lọc Critical: {criticalFilterCount}");
+
+        output.WriteLine(
+            $"Đăng ký sự kiện: {(coordinator.IsSubscribed ? "Có" : "Không")}");
+    }
+
+    // Giải phóng đăng ký sự kiện
+    public void Dispose()
+    {
+        if (disposed)
+            return;
+
+        coordinator.Dispose();
+        disposed = true;
+    }
+}
